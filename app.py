@@ -61,7 +61,6 @@ def overlay_transparent(background, overlay, x, y):
     if y1 >= y2 or x1 >= x2 or overlay_y1 >= overlay_y2 or overlay_x1 >= overlay_x2:
         return background
 
-    # Extract alpha channel safely
     alpha = overlay[overlay_y1:overlay_y2, overlay_x1:overlay_x2, 3] / 255.0
     for c in range(0, 3):
         background[y1:y2, x1:x2, c] = (
@@ -126,7 +125,6 @@ if input_image is not None:
         glasses_img = cv2.imread(asset_path, cv2.IMREAD_UNCHANGED)
         
         if glasses_img is not None:
-            # Ensure asset has 4 channels (RGBA)
             if len(glasses_img.shape) == 2:
                 glasses_img = cv2.cvtColor(glasses_img, cv2.COLOR_GRAY2BGRA)
             elif glasses_img.shape[2] == 3:
@@ -177,7 +175,8 @@ if input_image is not None:
                     output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
 
                     st.subheader("🎉 Your Try-On Result")
-                    st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), use_container_width=True)
+                    # Safe st.image call without deprecated container width parameters
+                    st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB))
                 else:
                     st.warning("⚠️ No face detected in the photo. Please make sure your face is clearly visible and well-lit.")
         else:
