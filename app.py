@@ -1,5 +1,4 @@
 import os
-import importlib
 import cv2
 import numpy as np
 import streamlit as st
@@ -15,7 +14,7 @@ st.set_page_config(
 )
 
 st.title("👓 Real-Time Virtual Glasses Try-On")
-st.write("Take a snapshot with your browser camera or upload a photo to try on glasses in real-time!")
+st.write("Take a snapshot with your browser camera or upload a photo to try on glasses!")
 
 # ---------------------------------------------------------------------------
 # Helper Functions: Transformation & Overlay Operations
@@ -89,7 +88,8 @@ def adjust_lighting(overlay_img, roi_bgr):
 # ---------------------------------------------------------------------------
 st.sidebar.header("⚙️ Try-On Settings")
 
-glasses_files = [f for f in os.listdir('.') if f.startswith('glasses') and f.endswith('.png')]
+base_dir = os.path.dirname(os.path.abspath(__file__))
+glasses_files = [f for f in os.listdir(base_dir) if f.startswith('glasses') and f.endswith('.png')]
 if not glasses_files:
     glasses_files = ['glasses.png']
 
@@ -118,67 +118,67 @@ else:
 # ---------------------------------------------------------------------------
 # Face Processing & Overlay Execution
 # ---------------------------------------------------------------------------
-if input_image is not None and os.path.exists(selected_asset):
-    glasses_img = cv2.imread(selected_asset, cv2.IMREAD_UNCHANGED)
+if input_image is not None:
+    asset_path = os.path.join(base_dir, selected_asset)
     
-    if glasses_img is not None and glasses_img.shape[2] == 4:
-        h, w, _ = input_image.shape
-        rgb_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
+    if os.path.exists(asset_path):
+        glasses_img = cv2.imread(asset_path, cv2.IMREAD_UNCHANGED)
         
-        # Safe fallback import for MediaPipe FaceMesh across package builds
-        face_mesh_module = None
-        try:
-            import mediapipe.python.solutions.face_mesh as face_mesh_module
-        except ImportError:
-            try:
-                face_mesh_module = importlib.import_module("mediapipe.solutions.face_mesh")
-            except ImportError:
-                face_mesh_module = mp.solutions.face_mesh
+        if glasses_img is not None:
+            # If image has 3 channels (no alpha), convert it to 4-channel RGBA automatically
+            if glasses_img.shape[2] == 3:
+                alpha_channel = np.ones((glasses_img.shape[0], glasses_img.shape[1], 1), dtype=glasses_img.dtype) * 255
+                glasses_img = np.concatenate((glasses_img, alpha_channel), axis=2)
 
-        with face_mesh_module.FaceMesh(
-            static_image_mode=True,
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.3
-        ) as face_mesh:
-            results = face_mesh.process(rgb_image)
+            h, w, _ = input_image.shape
+            rgb_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
+            
+            with mp.solutions.face_mesh.FaceMesh(
+                static_image_mode=True,
+                max_num_faces=1,
+                refine_landmarks=True,
+                min_detection_confidence=0.3
+            ) as face_mesh:
+                results = face_mesh.process(rgb_image)
 
-            if results.multi_face_landmarks:
-                landmarks = results.multi_face_landmarks[0].landmark
-                
-                # Key landmarks: 33 (Left Eye Outer), 263 (Right Eye Outer), 6 (Nose Bridge)
-                left_eye = np.array([landmarks[33].x * w, landmarks[33].y * h])
-                right_eye = np.array([landmarks[263].x * w, landmarks[263].y * h])
-                nose_bridge = np.array([landmarks[6].x * w, landmarks[6].y * h])
+                if results.multi_face_landmarks:
+                    landmarks = results.multi_face_landmarks[0].landmark
+                    
+                    # Key landmarks: 33 (Left Eye Outer), 263 (Right Eye Outer), 6 (Nose Bridge)
+                    left_eye = np.array([landmarks[33].x * w, landmarks[33].y * h])
+                    right_eye = np.array([landmarks[263].x * w, landmarks[263].y * h])
+                    nose_bridge = np.array([landmarks[6].x * w, landmarks[6].y * h])
 
-                eye_distance = np.linalg.norm(right_eye - left_eye)
-                angle = np.degrees(np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
+                    eye_distance = np.linalg.norm(right_eye - left_eye)
+                    angle = np.degrees(np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
 
-                target_width = int(eye_distance * scale_factor)
-                aspect_ratio = glasses_img.shape[0] / glasses_img.shape[1]
-                target_height = int(target_width * aspect_ratio)
+                    target_width = int(eye_distance * scale_factor)
+                    aspect_ratio = glasses_img.shape[0] / glasses_img.shape[1]
+                    target_height = int(target_width * aspect_ratio)
 
-                if target_width > 0 and target_height > 0:
-                    resized_glasses = cv2.resize(glasses_img, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                    if target_width > 0 and target_height > 0:
+                        resized_glasses = cv2.resize(glasses_img, (target_width, target_height), interpolation=cv2.INTER_AREA)
 
-                    if enable_lighting:
-                        roi_y1, roi_y2 = max(0, int(nose_bridge[1] - 50)), min(h, int(nose_bridge[1] + 50))
-                        roi_x1, roi_x2 = max(0, int(nose_bridge[0] - 50)), min(w, int(nose_bridge[0] + 50))
-                        face_roi = input_image[roi_y1:roi_y2, roi_x1:roi_x2]
-                        resized_glasses = adjust_lighting(resized_glasses, face_roi)
+                        if enable_lighting:
+                            roi_y1, roi_y2 = max(0, int(nose_bridge[1] - 50)), min(h, int(nose_bridge[1] + 50))
+                            roi_x1, roi_x2 = max(0, int(nose_bridge[0] - 50)), min(w, int(nose_bridge[0] + 50))
+                            face_roi = input_image[roi_y1:roi_y2, roi_x1:roi_x2]
+                            resized_glasses = adjust_lighting(resized_glasses, face_roi)
 
-                    rotated_glasses = rotate_image_unbound(resized_glasses, -angle)
+                        rotated_glasses = rotate_image_unbound(resized_glasses, -angle)
 
-                    gh, gw = rotated_glasses.shape[:2]
-                    top_left_x = int(nose_bridge[0] - gw / 2)
-                    top_left_y = int(nose_bridge[1] - gh / 2)
+                        gh, gw = rotated_glasses.shape[:2]
+                        top_left_x = int(nose_bridge[0] - gw / 2)
+                        top_left_y = int(nose_bridge[1] - gh / 2)
 
-                    output_image = input_image.copy()
-                    output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
+                        output_image = input_image.copy()
+                        output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
 
-                    st.subheader("🎉 Your Try-On Result")
-                    st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), use_container_width=True)
-            else:
-                st.warning("No face detected in the photo. Please make sure your face is clearly visible and well-lit.")
+                        st.subheader("🎉 Your Try-On Result")
+                        st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), use_container_width=True)
+                else:
+                    st.warning("No face detected in the photo. Please make sure your face is clearly visible and well-lit.")
+        else:
+            st.error(f"OpenCV failed to decode asset: {selected_asset}. Please check your PNG file format.")
     else:
-        st.error(f"Asset format error in {selected_asset}. Please ensure it is a 4-channel transparent PNG file.")
+        st.error(f"Asset file not found on server at path: {asset_path}")
