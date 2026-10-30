@@ -3,9 +3,7 @@ import cv2
 import numpy as np
 import streamlit as st
 import mediapipe as mp
-
-# Initialize MediaPipe FaceMesh solutions
-mp_face_mesh = mp.solutions.face_mesh
+import mediapipe.python.solutions.face_mesh as mp_face_mesh
 
 # ---------------------------------------------------------------------------
 # Streamlit Page Configuration
@@ -17,13 +15,13 @@ st.set_page_config(
 )
 
 st.title("👓 Real-Time Virtual Glasses Try-On")
-st.write("Take a snapshot with your camera or upload a photo to try on glasses!")
+st.write("Take a snapshot with your browser camera or upload a photo to try on glasses!")
 
 # ---------------------------------------------------------------------------
-# Helper Functions: Image Processing & Transformation
+# Helper Functions: Image Transformation & Overlays
 # ---------------------------------------------------------------------------
 def rotate_image_unbound(image, angle):
-    """Rotates an image by an angle without clipping corners."""
+    """Rotates an image by an angle without clipping corners by expanding the canvas."""
     (h, w) = image.shape[:2]
     (cx, cy) = (w // 2, h // 2)
 
@@ -85,7 +83,6 @@ def adjust_lighting(overlay_img, roi_bgr):
 # ---------------------------------------------------------------------------
 st.sidebar.header("⚙️ Try-On Settings")
 
-# Detect available PNG frames
 glasses_files = [f for f in os.listdir('.') if f.startswith('glasses') and f.endswith('.png')]
 if not glasses_files:
     glasses_files = ['glasses.png']
@@ -133,16 +130,14 @@ if input_image is not None and os.path.exists(selected_asset):
             if results.multi_face_landmarks:
                 landmarks = results.multi_face_landmarks[0].landmark
                 
-                # Key Landmarks: 33 (Left Eye), 263 (Right Eye), 6 (Nose Bridge)
+                # Key landmarks: 33 (Left Eye Outer), 263 (Right Eye Outer), 6 (Nose Bridge)
                 left_eye = np.array([landmarks[33].x * w, landmarks[33].y * h])
                 right_eye = np.array([landmarks[263].x * w, landmarks[263].y * h])
                 nose_bridge = np.array([landmarks[6].x * w, landmarks[6].y * h])
 
-                # Geometric calculations
                 eye_distance = np.linalg.norm(right_eye - left_eye)
                 angle = np.degrees(np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
 
-                # Scale asset
                 target_width = int(eye_distance * scale_factor)
                 aspect_ratio = glasses_img.shape[0] / glasses_img.shape[1]
                 target_height = int(target_width * aspect_ratio)
@@ -150,29 +145,24 @@ if input_image is not None and os.path.exists(selected_asset):
                 if target_width > 0 and target_height > 0:
                     resized_glasses = cv2.resize(glasses_img, (target_width, target_height), interpolation=cv2.INTER_AREA)
 
-                    # Dynamic Lighting Adjustment
                     if enable_lighting:
                         roi_y1, roi_y2 = max(0, int(nose_bridge[1] - 50)), min(h, int(nose_bridge[1] + 50))
                         roi_x1, roi_x2 = max(0, int(nose_bridge[0] - 50)), min(w, int(nose_bridge[0] + 50))
                         face_roi = input_image[roi_y1:roi_y2, roi_x1:roi_x2]
                         resized_glasses = adjust_lighting(resized_glasses, face_roi)
 
-                    # Rotation for Head Tilt
                     rotated_glasses = rotate_image_unbound(resized_glasses, -angle)
 
-                    # Coordinates calculation
                     gh, gw = rotated_glasses.shape[:2]
                     top_left_x = int(nose_bridge[0] - gw / 2)
                     top_left_y = int(nose_bridge[1] - gh / 2)
 
-                    # Composite image
                     output_image = input_image.copy()
                     output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
 
-                    # Render Output
                     st.subheader("🎉 Your Try-On Result")
                     st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), use_container_width=True)
             else:
-                st.warning("No face detected in the photo. Please make sure your face is clearly visible and well lit.")
+                st.warning("No face detected in the photo. Please make sure your face is clearly visible and well-lit.")
     else:
-        st.error(f"Asset format error in {selected_asset}. Please ensure the PNG file includes an alpha transparency channel.")
+        st.error(f"Asset format error in {selected_asset}. Please ensure it is a 4-channel transparent PNG file.")
