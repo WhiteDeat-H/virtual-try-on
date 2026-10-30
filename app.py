@@ -89,8 +89,9 @@ if not glasses_files:
 
 selected_asset = st.sidebar.selectbox("Select Glasses Style", glasses_files)
 scale_factor = st.sidebar.slider("Glasses Scale Factor", min_value=1.0, max_value=3.0, value=1.8, step=0.05)
-vertical_offset = st.sidebar.slider("Vertical Position Adjustment", min_value=-50, max_value=50, value=-15, step=1)
+vertical_offset = st.sidebar.slider("Vertical Position Adjustment", min_value=-100, max_value=100, value=-20, step=1)
 enable_lighting = st.sidebar.checkbox("Enable Dynamic Lighting", value=True)
+show_debug = st.sidebar.checkbox("Show Landmark Debug Dots", value=True)
 
 # ---------------------------------------------------------------------------
 # Input Controls & Frame Capture
@@ -120,7 +121,6 @@ if input_image is not None:
         glasses_img = cv2.imread(asset_path, cv2.IMREAD_UNCHANGED)
         
         if glasses_img is not None:
-            # Ensure 4-channel RGBA
             if glasses_img.shape[2] == 3:
                 alpha_channel = np.ones((glasses_img.shape[0], glasses_img.shape[1], 1), dtype=glasses_img.dtype) * 255
                 glasses_img = np.concatenate((glasses_img, alpha_channel), axis=2)
@@ -140,11 +140,8 @@ if input_image is not None:
                     st.success("✅ Face successfully detected!")
                     landmarks = results.multi_face_landmarks[0].landmark
                     
-                    # Key landmarks: 33 (Left Eye Outer), 263 (Right Eye Outer), 168 (Nose Bridge / Between Eyes)
                     left_eye = np.array([landmarks[33].x * w, landmarks[33].y * h])
                     right_eye = np.array([landmarks[263].x * w, landmarks[263].y * h])
-                    
-                    # Midpoint between eyes for center positioning
                     eye_center = (left_eye + right_eye) / 2.0
 
                     eye_distance = np.linalg.norm(right_eye - left_eye)
@@ -153,6 +150,14 @@ if input_image is not None:
                     target_width = int(eye_distance * scale_factor)
                     aspect_ratio = glasses_img.shape[0] / glasses_img.shape[1]
                     target_height = int(target_width * aspect_ratio)
+
+                    output_image = input_image.copy()
+
+                    # Draw debug dots on eyes if enabled
+                    if show_debug:
+                        cv2.circle(output_image, (int(left_eye[0]), int(left_eye[1])), 6, (0, 255, 0), -1)   # Green = Left Eye
+                        cv2.circle(output_image, (int(right_eye[0]), int(right_eye[1])), 6, (0, 0, 255), -1)   # Red = Right Eye
+                        cv2.circle(output_image, (int(eye_center[0]), int(eye_center[1])), 6, (255, 0, 0), -1) # Blue = Center
 
                     if target_width > 0 and target_height > 0:
                         resized_glasses = cv2.resize(glasses_img, (target_width, target_height), interpolation=cv2.INTER_AREA)
@@ -166,11 +171,11 @@ if input_image is not None:
                         rotated_glasses = rotate_image_unbound(resized_glasses, -angle)
 
                         gh, gw = rotated_glasses.shape[:2]
-                        # Center glasses precisely over the eye center + vertical offset
                         top_left_x = int(eye_center[0] - gw / 2)
                         top_left_y = int(eye_center[1] - gh / 2 + vertical_offset)
 
-                        output_image = input_image.copy()
+                        st.info(f"📊 Debug Stats — Eye Distance: {int(eye_distance)}px | Glasses Size: {gw}x{gh}px | Coords: ({top_left_x}, {top_left_y})")
+
                         output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
 
                         st.subheader("🎉 Your Try-On Result")
