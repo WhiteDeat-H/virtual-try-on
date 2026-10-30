@@ -42,7 +42,7 @@ def rotate_image_unbound(image, angle):
     )
 
 def overlay_transparent(background, overlay, x, y):
-    """Blends a 4-channel RGBA overlay onto a 3-channel BGR background image at (x, y)."""
+    """Blends 4-channel RGBA overlay onto a 3-channel BGR background image at (x, y)."""
     bg_h, bg_w = background.shape[:2]
     ol_h, ol_w = overlay.shape[:2]
 
@@ -91,7 +91,8 @@ selected_asset = st.sidebar.selectbox("Select Glasses Style", glasses_files)
 scale_factor = st.sidebar.slider("Glasses Scale Factor", min_value=1.0, max_value=3.0, value=1.8, step=0.05)
 vertical_offset = st.sidebar.slider("Vertical Position Adjustment", min_value=-100, max_value=100, value=-20, step=1)
 enable_lighting = st.sidebar.checkbox("Enable Dynamic Lighting", value=True)
-show_debug = st.sidebar.checkbox("Show Landmark Debug Dots", value=True)
+fix_black_bg = st.sidebar.checkbox("🔧 Fix Black/Opaque Asset Background", value=True)
+show_test_box = st.sidebar.checkbox("🟦 Draw Test Bounding Box over Eyes", value=False)
 
 # ---------------------------------------------------------------------------
 # Input Controls & Frame Capture
@@ -121,9 +122,16 @@ if input_image is not None:
         glasses_img = cv2.imread(asset_path, cv2.IMREAD_UNCHANGED)
         
         if glasses_img is not None:
+            # Handle alpha channel
             if glasses_img.shape[2] == 3:
                 alpha_channel = np.ones((glasses_img.shape[0], glasses_img.shape[1], 1), dtype=glasses_img.dtype) * 255
                 glasses_img = np.concatenate((glasses_img, alpha_channel), axis=2)
+            
+            # If user checked "Fix Black Background", convert black pixels to transparent alpha
+            if fix_black_bg:
+                gray = cv2.cvtColor(glasses_img[:, :, :3], cv2.COLOR_BGR2GRAY)
+                _, alpha = cv2.threshold(gray, 20, 255, cv2.THRESH_BINARY)
+                glasses_img[:, :, 3] = alpha
 
             h, w, _ = input_image.shape
             rgb_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
@@ -153,12 +161,6 @@ if input_image is not None:
 
                     output_image = input_image.copy()
 
-                    # Draw debug dots on eyes if enabled
-                    if show_debug:
-                        cv2.circle(output_image, (int(left_eye[0]), int(left_eye[1])), 6, (0, 255, 0), -1)   # Green = Left Eye
-                        cv2.circle(output_image, (int(right_eye[0]), int(right_eye[1])), 6, (0, 0, 255), -1)   # Red = Right Eye
-                        cv2.circle(output_image, (int(eye_center[0]), int(eye_center[1])), 6, (255, 0, 0), -1) # Blue = Center
-
                     if target_width > 0 and target_height > 0:
                         resized_glasses = cv2.resize(glasses_img, (target_width, target_height), interpolation=cv2.INTER_AREA)
 
@@ -175,6 +177,10 @@ if input_image is not None:
                         top_left_y = int(eye_center[1] - gh / 2 + vertical_offset)
 
                         st.info(f"📊 Debug Stats — Eye Distance: {int(eye_distance)}px | Glasses Size: {gw}x{gh}px | Coords: ({top_left_x}, {top_left_y})")
+
+                        # Draw test bounding box if enabled
+                        if show_test_box:
+                            cv2.rectangle(output_image, (top_left_x, top_left_y), (top_left_x + gw, top_left_y + gh), (255, 0, 0), 3)
 
                         output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
 
