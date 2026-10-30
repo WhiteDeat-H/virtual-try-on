@@ -4,6 +4,9 @@ import numpy as np
 import streamlit as st
 import mediapipe as mp
 
+# Initialize FaceMesh safely
+mp_face_mesh = mp.solutions.face_mesh
+
 # ---------------------------------------------------------------------------
 # Streamlit Page Configuration
 # ---------------------------------------------------------------------------
@@ -20,7 +23,6 @@ st.write("Take a snapshot with your browser camera or upload a photo to try on g
 # Helper Functions: Transformation & Overlay Operations
 # ---------------------------------------------------------------------------
 def rotate_image_unbound(image, angle):
-    """Rotates an image by an angle without clipping corners by expanding the canvas."""
     (h, w) = image.shape[:2]
     (cx, cy) = (w // 2, h // 2)
 
@@ -42,7 +44,6 @@ def rotate_image_unbound(image, angle):
     )
 
 def overlay_transparent(background, overlay, x, y):
-    """Blends 4-channel RGBA overlay onto a 3-channel BGR background image at (x, y)."""
     bg_h, bg_w = background.shape[:2]
     ol_h, ol_w = overlay.shape[:2]
 
@@ -64,7 +65,6 @@ def overlay_transparent(background, overlay, x, y):
     return background
 
 def adjust_lighting(overlay_img, roi_bgr):
-    """Dynamically scales overlay asset brightness matching facial ROI."""
     if roi_bgr.size == 0:
         return overlay_img
     
@@ -92,7 +92,6 @@ scale_factor = st.sidebar.slider("Glasses Scale Factor", min_value=1.0, max_valu
 vertical_offset = st.sidebar.slider("Vertical Position Adjustment", min_value=-100, max_value=100, value=-20, step=1)
 enable_lighting = st.sidebar.checkbox("Enable Dynamic Lighting", value=True)
 fix_black_bg = st.sidebar.checkbox("🔧 Fix Black/Opaque Asset Background", value=True)
-show_test_box = st.sidebar.checkbox("🟦 Draw Test Bounding Box over Eyes", value=False)
 
 # ---------------------------------------------------------------------------
 # Input Controls & Frame Capture
@@ -122,12 +121,10 @@ if input_image is not None:
         glasses_img = cv2.imread(asset_path, cv2.IMREAD_UNCHANGED)
         
         if glasses_img is not None:
-            # Handle alpha channel
             if glasses_img.shape[2] == 3:
                 alpha_channel = np.ones((glasses_img.shape[0], glasses_img.shape[1], 1), dtype=glasses_img.dtype) * 255
                 glasses_img = np.concatenate((glasses_img, alpha_channel), axis=2)
             
-            # If user checked "Fix Black Background", convert black pixels to transparent alpha
             if fix_black_bg:
                 gray = cv2.cvtColor(glasses_img[:, :, :3], cv2.COLOR_BGR2GRAY)
                 _, alpha = cv2.threshold(gray, 20, 255, cv2.THRESH_BINARY)
@@ -136,7 +133,7 @@ if input_image is not None:
             h, w, _ = input_image.shape
             rgb_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
             
-            with mp.solutions.face_mesh.FaceMesh(
+            with mp_face_mesh.FaceMesh(
                 static_image_mode=True,
                 max_num_faces=1,
                 refine_landmarks=True,
@@ -145,7 +142,6 @@ if input_image is not None:
                 results = face_mesh.process(rgb_image)
 
                 if results.multi_face_landmarks:
-                    st.success("✅ Face successfully detected!")
                     landmarks = results.multi_face_landmarks[0].landmark
                     
                     left_eye = np.array([landmarks[33].x * w, landmarks[33].y * h])
@@ -176,16 +172,10 @@ if input_image is not None:
                         top_left_x = int(eye_center[0] - gw / 2)
                         top_left_y = int(eye_center[1] - gh / 2 + vertical_offset)
 
-                        st.info(f"📊 Debug Stats — Eye Distance: {int(eye_distance)}px | Glasses Size: {gw}x{gh}px | Coords: ({top_left_x}, {top_left_y})")
-
-                        # Draw test bounding box if enabled
-                        if show_test_box:
-                            cv2.rectangle(output_image, (top_left_x, top_left_y), (top_left_x + gw, top_left_y + gh), (255, 0, 0), 3)
-
                         output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
 
                         st.subheader("🎉 Your Try-On Result")
-                        st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), use_container_width=True)
+                        st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), width="stretch")
                 else:
                     st.warning("⚠️ No face detected in the photo. Please make sure your face is clearly visible and well-lit.")
         else:
