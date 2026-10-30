@@ -20,9 +20,7 @@ st.write("Take a snapshot with your browser camera or upload a photo to try on g
 # Helper Functions: Transformation & Overlay Operations
 # ---------------------------------------------------------------------------
 def rotate_image_unbound(image, angle):
-    """
-    Rotates an image by an angle without clipping corners by expanding the canvas.
-    """
+    """Rotates an image by an angle without clipping corners by expanding the canvas."""
     (h, w) = image.shape[:2]
     (cx, cy) = (w // 2, h // 2)
 
@@ -44,9 +42,7 @@ def rotate_image_unbound(image, angle):
     )
 
 def overlay_transparent(background, overlay, x, y):
-    """
-    Blends a 4-channel RGBA overlay onto a 3-channel BGR background image at (x, y).
-    """
+    """Blends a 4-channel RGBA overlay onto a 3-channel BGR background image at (x, y)."""
     bg_h, bg_w = background.shape[:2]
     ol_h, ol_w = overlay.shape[:2]
 
@@ -68,9 +64,7 @@ def overlay_transparent(background, overlay, x, y):
     return background
 
 def adjust_lighting(overlay_img, roi_bgr):
-    """
-    Dynamically scales overlay asset brightness matching facial ROI.
-    """
+    """Dynamically scales overlay asset brightness matching facial ROI."""
     if roi_bgr.size == 0:
         return overlay_img
     
@@ -94,7 +88,8 @@ if not glasses_files:
     glasses_files = ['glasses.png']
 
 selected_asset = st.sidebar.selectbox("Select Glasses Style", glasses_files)
-scale_factor = st.sidebar.slider("Glasses Scale Factor", min_value=1.0, max_value=2.5, value=1.6, step=0.05)
+scale_factor = st.sidebar.slider("Glasses Scale Factor", min_value=1.0, max_value=3.0, value=1.8, step=0.05)
+vertical_offset = st.sidebar.slider("Vertical Position Adjustment", min_value=-50, max_value=50, value=-15, step=1)
 enable_lighting = st.sidebar.checkbox("Enable Dynamic Lighting", value=True)
 
 # ---------------------------------------------------------------------------
@@ -125,7 +120,7 @@ if input_image is not None:
         glasses_img = cv2.imread(asset_path, cv2.IMREAD_UNCHANGED)
         
         if glasses_img is not None:
-            # If image has 3 channels (no alpha), convert it to 4-channel RGBA automatically
+            # Ensure 4-channel RGBA
             if glasses_img.shape[2] == 3:
                 alpha_channel = np.ones((glasses_img.shape[0], glasses_img.shape[1], 1), dtype=glasses_img.dtype) * 255
                 glasses_img = np.concatenate((glasses_img, alpha_channel), axis=2)
@@ -142,12 +137,15 @@ if input_image is not None:
                 results = face_mesh.process(rgb_image)
 
                 if results.multi_face_landmarks:
+                    st.success("✅ Face successfully detected!")
                     landmarks = results.multi_face_landmarks[0].landmark
                     
-                    # Key landmarks: 33 (Left Eye Outer), 263 (Right Eye Outer), 6 (Nose Bridge)
+                    # Key landmarks: 33 (Left Eye Outer), 263 (Right Eye Outer), 168 (Nose Bridge / Between Eyes)
                     left_eye = np.array([landmarks[33].x * w, landmarks[33].y * h])
                     right_eye = np.array([landmarks[263].x * w, landmarks[263].y * h])
-                    nose_bridge = np.array([landmarks[6].x * w, landmarks[6].y * h])
+                    
+                    # Midpoint between eyes for center positioning
+                    eye_center = (left_eye + right_eye) / 2.0
 
                     eye_distance = np.linalg.norm(right_eye - left_eye)
                     angle = np.degrees(np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
@@ -160,16 +158,17 @@ if input_image is not None:
                         resized_glasses = cv2.resize(glasses_img, (target_width, target_height), interpolation=cv2.INTER_AREA)
 
                         if enable_lighting:
-                            roi_y1, roi_y2 = max(0, int(nose_bridge[1] - 50)), min(h, int(nose_bridge[1] + 50))
-                            roi_x1, roi_x2 = max(0, int(nose_bridge[0] - 50)), min(w, int(nose_bridge[0] + 50))
+                            roi_y1, roi_y2 = max(0, int(eye_center[1] - 50)), min(h, int(eye_center[1] + 50))
+                            roi_x1, roi_x2 = max(0, int(eye_center[0] - 50)), min(w, int(eye_center[0] + 50))
                             face_roi = input_image[roi_y1:roi_y2, roi_x1:roi_x2]
                             resized_glasses = adjust_lighting(resized_glasses, face_roi)
 
                         rotated_glasses = rotate_image_unbound(resized_glasses, -angle)
 
                         gh, gw = rotated_glasses.shape[:2]
-                        top_left_x = int(nose_bridge[0] - gw / 2)
-                        top_left_y = int(nose_bridge[1] - gh / 2)
+                        # Center glasses precisely over the eye center + vertical offset
+                        top_left_x = int(eye_center[0] - gw / 2)
+                        top_left_y = int(eye_center[1] - gh / 2 + vertical_offset)
 
                         output_image = input_image.copy()
                         output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
@@ -177,8 +176,8 @@ if input_image is not None:
                         st.subheader("🎉 Your Try-On Result")
                         st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), use_container_width=True)
                 else:
-                    st.warning("No face detected in the photo. Please make sure your face is clearly visible and well-lit.")
+                    st.warning("⚠️ No face detected in the photo. Please make sure your face is clearly visible and well-lit.")
         else:
-            st.error(f"OpenCV failed to decode asset: {selected_asset}. Please check your PNG file format.")
+            st.error(f"OpenCV failed to decode asset: {selected_asset}.")
     else:
         st.error(f"Asset file not found on server at path: {asset_path}")
