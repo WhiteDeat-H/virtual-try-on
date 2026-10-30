@@ -1,10 +1,13 @@
 import os
 import cv2
 import numpy as np
+
+# Force CPU execution for OpenCV and MediaPipe to prevent missing OpenGL libraries (libGLESv2.so.2)
+os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = "PEER"
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
 import streamlit as st
 import mediapipe as mp
-
-# Initialize MediaPipe Face Landmarker / Solutions safe wrapper for v1.2.0+
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
@@ -139,17 +142,19 @@ if input_image is not None:
             rgb_image = np.ascontiguousarray(rgb_image)
 
             try:
-                # Use modern MediaPipe Vision FaceLandmarker via Tasks API
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_image)
                 
-                base_options = python.BaseOptions(model_asset_path='face_landmarker.task')
+                # Force CPU delegate explicitly for MediaPipe tasks
+                base_options = python.BaseOptions(
+                    model_asset_path='face_landmarker.task',
+                    delegate=python.BaseOptions.Delegate.CPU
+                )
                 options = vision.FaceLandmarkerOptions(
                     base_options=base_options,
                     output_face_blendshapes=False,
                     num_faces=1
                 )
                 
-                # Automatically download the face landmarker model if not present locally
                 model_path = 'face_landmarker.task'
                 if not os.path.exists(model_path):
                     import urllib.request
@@ -164,7 +169,6 @@ if input_image is not None:
                     if detection_result.face_landmarks:
                         landmarks = detection_result.face_landmarks[0]
                         
-                        # Indices 33 (left eye) and 263 (right eye) remain identical in modern face mesh
                         left_eye = np.array([landmarks[33].x * w, landmarks[33].y * h])
                         right_eye = np.array([landmarks[263].x * w, landmarks[263].y * h])
                         eye_center = (left_eye + right_eye) / 2.0
