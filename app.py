@@ -61,6 +61,7 @@ def overlay_transparent(background, overlay, x, y):
     if y1 >= y2 or x1 >= x2 or overlay_y1 >= overlay_y2 or overlay_x1 >= overlay_x2:
         return background
 
+    # Extract alpha channel safely
     alpha = overlay[overlay_y1:overlay_y2, overlay_x1:overlay_x2, 3] / 255.0
     for c in range(0, 3):
         background[y1:y2, x1:x2, c] = (
@@ -96,7 +97,6 @@ selected_asset = st.sidebar.selectbox("Select Glasses Style", glasses_files)
 scale_factor = st.sidebar.slider("Glasses Scale Factor", min_value=1.0, max_value=3.0, value=1.8, step=0.05)
 vertical_offset = st.sidebar.slider("Vertical Position Adjustment", min_value=-100, max_value=100, value=-20, step=1)
 enable_lighting = st.sidebar.checkbox("Enable Dynamic Lighting", value=True)
-fix_black_bg = st.sidebar.checkbox("🔧 Fix Black/Opaque Asset Background", value=True)
 
 # ---------------------------------------------------------------------------
 # Input Controls & Frame Capture
@@ -126,17 +126,12 @@ if input_image is not None:
         glasses_img = cv2.imread(asset_path, cv2.IMREAD_UNCHANGED)
         
         if glasses_img is not None:
-            # Ensure 4-channel RGBA
-            if len(glasses_img.shape) == 2: # Grayscale
+            # Ensure asset has 4 channels (RGBA)
+            if len(glasses_img.shape) == 2:
                 glasses_img = cv2.cvtColor(glasses_img, cv2.COLOR_GRAY2BGRA)
-            elif glasses_img.shape[2] == 3: # BGR
+            elif glasses_img.shape[2] == 3:
                 alpha_channel = np.ones((glasses_img.shape[0], glasses_img.shape[1], 1), dtype=glasses_img.dtype) * 255
                 glasses_img = np.concatenate((glasses_img, alpha_channel), axis=2)
-            
-            if fix_black_bg and glasses_img.shape[2] >= 3:
-                gray = cv2.cvtColor(glasses_img[:, :, :3], cv2.COLOR_BGR2GRAY)
-                _, alpha = cv2.threshold(gray, 25, 255, cv2.THRESH_BINARY)
-                glasses_img[:, :, 3] = alpha
 
             h, w, _ = input_image.shape
             rgb_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
