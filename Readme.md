@@ -1,3 +1,9 @@
+![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![OpenCV](https://img.shields.io/badge/OpenCV-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white)
+![MediaPipe](https://img.shields.io/badge/MediaPipe-00979D?style=for-the-badge&logo=google&logoColor=white)
+![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)
+
+---
 # Real-Time Virtual Try-On (VTO) Application
 
 An interactive Real-Time Virtual Try-On application built with Python, OpenCV, MediaPipe, and Streamlit. It tracks facial landmarks in real time to accurately overlay eyewear accessories with head-tilt compensation, jitter reduction, ambient lighting adjustment, and soft 3D drop shadows.
