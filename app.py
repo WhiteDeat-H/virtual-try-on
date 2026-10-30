@@ -4,6 +4,9 @@ import numpy as np
 import streamlit as st
 import mediapipe as mp
 
+# Explicitly initialize MediaPipe FaceMesh solutions
+mp_face_mesh = mp.solutions.face_mesh
+
 # ---------------------------------------------------------------------------
 # Streamlit Page Configuration
 # ---------------------------------------------------------------------------
@@ -124,12 +127,12 @@ if input_image is not None and os.path.exists(selected_asset):
         h, w, _ = input_image.shape
         rgb_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
         
-        # Access MediaPipe FaceMesh safely inside context manager
-        with mp.solutions.face_mesh.FaceMesh(
+        # Use module-level mp_face_mesh reference
+        with mp_face_mesh.FaceMesh(
             static_image_mode=True,
             max_num_faces=1,
             refine_landmarks=True,
-            min_detection_confidence=0.5
+            min_detection_confidence=0.3
         ) as face_mesh:
             results = face_mesh.process(rgb_image)
 
@@ -169,6 +172,6 @@ if input_image is not None and os.path.exists(selected_asset):
                     st.subheader("🎉 Your Try-On Result")
                     st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), use_container_width=True)
             else:
-                st.warning("No face detected in the photo. Please ensure your face is clearly visible and well-lit.")
+                st.warning("No face detected in the photo. Please make sure your face is clearly visible and well-lit.")
     else:
         st.error(f"Asset format error in {selected_asset}. Please ensure it is a 4-channel transparent PNG file.")
