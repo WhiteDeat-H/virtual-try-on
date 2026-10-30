@@ -1,0 +1,10 @@
+# Virtual Environment
+vto_env/
+__pycache__/
+
+# Saved Screenshots / Snapshots
+tryon_snapshot_*.png
+
+# VS Code / IDE settings
+.vscode/
+.DS_Store
