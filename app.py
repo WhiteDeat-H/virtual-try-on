@@ -3,7 +3,6 @@ import cv2
 import numpy as np
 import streamlit as st
 import mediapipe as mp
-from mediapipe.solutions import face_mesh as mp_face_mesh #type: ignore
 
 # ---------------------------------------------------------------------------
 # Streamlit Page Configuration
@@ -15,7 +14,7 @@ st.set_page_config(
 )
 
 st.title("👓 Real-Time Virtual Glasses Try-On")
-st.write("Take a snapshot with your browser camera or upload a photo to try on glasses in real-time!")
+st.write("Take a snapshot with your camera or upload a photo to try on glasses in real-time!")
 
 # ---------------------------------------------------------------------------
 # Helper Functions: Transformation & Overlay Operations
@@ -125,7 +124,8 @@ if input_image is not None and os.path.exists(selected_asset):
         h, w, _ = input_image.shape
         rgb_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
         
-        with mp_face_mesh.FaceMesh(
+        # Initialize FaceMesh directly from mediapipe solutions
+        with mp.solutions.face_mesh.FaceMesh(
             static_image_mode=True,
             max_num_faces=1,
             refine_landmarks=True,
