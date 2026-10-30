@@ -3,28 +3,27 @@ import cv2
 import numpy as np
 import streamlit as st
 import mediapipe as mp
-from mediapipe.python.solutions import face_mesh as mp_face_mesh
+
+# Initialize MediaPipe FaceMesh solutions
+mp_face_mesh = mp.solutions.face_mesh
 
 # ---------------------------------------------------------------------------
 # Streamlit Page Configuration
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Virtual Try-On Web App",
+    page_title="Virtual Glasses Try-On",
     page_icon="👓",
     layout="wide"
 )
 
 st.title("👓 Real-Time Virtual Glasses Try-On")
-st.write("Upload a photo or use your browser camera to try on different eyewear frames in real-time!")
+st.write("Take a snapshot with your camera or upload a photo to try on glasses!")
 
 # ---------------------------------------------------------------------------
-# Helper Functions: Image Transformation & Overlays
+# Helper Functions: Image Processing & Transformation
 # ---------------------------------------------------------------------------
 def rotate_image_unbound(image, angle):
-    """
-    Rotates an image by an angle without clipping the corners.
-    Expands the canvas bounding box dynamically.
-    """
+    """Rotates an image by an angle without clipping corners."""
     (h, w) = image.shape[:2]
     (cx, cy) = (w // 2, h // 2)
 
@@ -46,16 +45,13 @@ def rotate_image_unbound(image, angle):
     )
 
 def overlay_transparent(background, overlay, x, y):
-    """
-    Blends a 4-channel BGRA overlay onto a 3-channel BGR background image at (x, y).
-    """
+    """Blends 4-channel RGBA overlay onto 3-channel BGR background image."""
     bg_h, bg_w = background.shape[:2]
     ol_h, ol_w = overlay.shape[:2]
 
     if x >= bg_w or y >= bg_h or x + ol_w <= 0 or y + ol_h <= 0:
         return background
 
-    # Compute cropping regions
     x1, x2 = max(0, x), min(bg_w, x + ol_w)
     y1, y2 = max(0, y), min(bg_h, y + ol_h)
 
@@ -71,16 +67,12 @@ def overlay_transparent(background, overlay, x, y):
     return background
 
 def adjust_lighting(overlay_img, roi_bgr):
-    """
-    Adjusts overlay asset brightness based on the average brightness of the face ROI.
-    """
+    """Dynamically scales overlay asset brightness matching facial ROI."""
     if roi_bgr.size == 0:
         return overlay_img
     
     hsv_roi = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
     avg_brightness = np.mean(hsv_roi[:, :, 2])
-    
-    # Scale factor normalized around 128
     scale = np.clip(avg_brightness / 128.0, 0.6, 1.3)
     
     adjusted = overlay_img.astype(np.float32)
@@ -93,27 +85,17 @@ def adjust_lighting(overlay_img, roi_bgr):
 # ---------------------------------------------------------------------------
 st.sidebar.header("⚙️ Try-On Settings")
 
-# Asset Discovery
+# Detect available PNG frames
 glasses_files = [f for f in os.listdir('.') if f.startswith('glasses') and f.endswith('.png')]
 if not glasses_files:
-    glasses_files = ['glasses.png']  # Default fallback
+    glasses_files = ['glasses.png']
 
-selected_asset = st.sidebar.selectbox("Select Eyewear Style", glasses_files)
+selected_asset = st.sidebar.selectbox("Select Glasses Style", glasses_files)
 scale_factor = st.sidebar.slider("Glasses Scale Factor", min_value=1.0, max_value=2.5, value=1.6, step=0.05)
-enable_lighting = st.sidebar.checkbox("Enable Dynamic Lighting Adjustment", value=True)
+enable_lighting = st.sidebar.checkbox("Enable Dynamic Lighting", value=True)
 
 # ---------------------------------------------------------------------------
-# MediaPipe FaceMesh Initialization
-# ---------------------------------------------------------------------------
-face_mesh = mp_face_mesh.FaceMesh(
-    static_image_mode=True,
-    max_num_faces=1,
-    refine_landmarks=True,
-    min_detection_confidence=0.5
-)
-
-# ---------------------------------------------------------------------------
-# Input Options: Camera or File Upload
+# Input Controls & Frame Capture
 # ---------------------------------------------------------------------------
 input_mode = st.radio("Choose Input Mode:", ["Use Web Camera", "Upload Photo"], horizontal=True)
 
@@ -124,7 +106,6 @@ if input_mode == "Use Web Camera":
     if camera_file is not None:
         file_bytes = np.asarray(bytearray(camera_file.read()), dtype=np.uint8)
         input_image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-
 else:
     uploaded_file = st.file_uploader("Upload an image (JPG / PNG)", type=["jpg", "jpeg", "png"])
     if uploaded_file is not None:
@@ -132,60 +113,66 @@ else:
         input_image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
 # ---------------------------------------------------------------------------
-# Image Processing & Try-On Pipeline
+# Face Processing & Overlay Execution
 # ---------------------------------------------------------------------------
 if input_image is not None and os.path.exists(selected_asset):
-    # Load transparent glasses PNG
     glasses_img = cv2.imread(selected_asset, cv2.IMREAD_UNCHANGED)
     
     if glasses_img is not None and glasses_img.shape[2] == 4:
         h, w, _ = input_image.shape
         rgb_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(rgb_image)
+        
+        with mp_face_mesh.FaceMesh(
+            static_image_mode=True,
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5
+        ) as face_mesh:
+            results = face_mesh.process(rgb_image)
 
-        if results.multi_face_landmarks:
-            landmarks = results.multi_face_landmarks[0].landmark
-            
-            # Key Landmarks: 33 (Left Eye Outer), 263 (Right Eye Outer), 6 (Nose Bridge)
-            left_eye = np.array([landmarks[33].x * w, landmarks[33].y * h])
-            right_eye = np.array([landmarks[263].x * w, landmarks[263].y * h])
-            nose_bridge = np.array([landmarks[6].x * w, landmarks[6].y * h])
+            if results.multi_face_landmarks:
+                landmarks = results.multi_face_landmarks[0].landmark
+                
+                # Key Landmarks: 33 (Left Eye), 263 (Right Eye), 6 (Nose Bridge)
+                left_eye = np.array([landmarks[33].x * w, landmarks[33].y * h])
+                right_eye = np.array([landmarks[263].x * w, landmarks[263].y * h])
+                nose_bridge = np.array([landmarks[6].x * w, landmarks[6].y * h])
 
-            # Calculate Distance & Tilt Angle
-            eye_distance = np.linalg.norm(right_eye - left_eye)
-            angle = np.degrees(np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
+                # Geometric calculations
+                eye_distance = np.linalg.norm(right_eye - left_eye)
+                angle = np.degrees(np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
 
-            # Resize Glasses
-            target_width = int(eye_distance * scale_factor)
-            aspect_ratio = glasses_img.shape[0] / glasses_img.shape[1]
-            target_height = int(target_width * aspect_ratio)
+                # Scale asset
+                target_width = int(eye_distance * scale_factor)
+                aspect_ratio = glasses_img.shape[0] / glasses_img.shape[1]
+                target_height = int(target_width * aspect_ratio)
 
-            if target_width > 0 and target_height > 0:
-                resized_glasses = cv2.resize(glasses_img, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                if target_width > 0 and target_height > 0:
+                    resized_glasses = cv2.resize(glasses_img, (target_width, target_height), interpolation=cv2.INTER_AREA)
 
-                # Dynamic Lighting Adjustment
-                if enable_lighting:
-                    roi_y1, roi_y2 = max(0, int(nose_bridge[1] - 50)), min(h, int(nose_bridge[1] + 50))
-                    roi_x1, roi_x2 = max(0, int(nose_bridge[0] - 50)), min(w, int(nose_bridge[0] + 50))
-                    face_roi = input_image[roi_y1:roi_y2, roi_x1:roi_x2]
-                    resized_glasses = adjust_lighting(resized_glasses, face_roi)
+                    # Dynamic Lighting Adjustment
+                    if enable_lighting:
+                        roi_y1, roi_y2 = max(0, int(nose_bridge[1] - 50)), min(h, int(nose_bridge[1] + 50))
+                        roi_x1, roi_x2 = max(0, int(nose_bridge[0] - 50)), min(w, int(nose_bridge[0] + 50))
+                        face_roi = input_image[roi_y1:roi_y2, roi_x1:roi_x2]
+                        resized_glasses = adjust_lighting(resized_glasses, face_roi)
 
-                # Rotate Glasses for Head Tilt
-                rotated_glasses = rotate_image_unbound(resized_glasses, -angle)
+                    # Rotation for Head Tilt
+                    rotated_glasses = rotate_image_unbound(resized_glasses, -angle)
 
-                # Top-Left Placement Coordinates
-                gh, gw = rotated_glasses.shape[:2]
-                top_left_x = int(nose_bridge[0] - gw / 2)
-                top_left_y = int(nose_bridge[1] - gh / 2)
+                    # Coordinates calculation
+                    gh, gw = rotated_glasses.shape[:2]
+                    top_left_x = int(nose_bridge[0] - gw / 2)
+                    top_left_y = int(nose_bridge[1] - gh / 2)
 
-                # Composite Glasses onto Image
-                output_image = input_image.copy()
-                output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
+                    # Composite image
+                    output_image = input_image.copy()
+                    output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
 
-                # Render Result
-                st.subheader("🎉 Your Virtual Try-On Result")
-                st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), use_container_width=True)
-        else:
-            st.warning("No face detected in the image. Please ensure your face is clearly visible and well-lit.")
+                    # Render Output
+                    st.subheader("🎉 Your Try-On Result")
+                    st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), use_container_width=True)
+            else:
+                st.warning("No face detected in the photo. Please make sure your face is clearly visible and well lit.")
     else:
-        st.error(f"Failed to load transparency for asset: {selected_asset}. Ensure it is a 4-channel RGBA PNG file.")
+        st.error(f"Asset format error in {selected_asset}. Please ensure the PNG file includes an alpha transparency channel.")
