@@ -3,6 +3,8 @@ import cv2
 import numpy as np
 import streamlit as st
 import mediapipe as mp
+
+# Initialize MediaPipe Face Landmarker / Solutions safe wrapper for v1.2.0+
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
@@ -115,7 +117,7 @@ else:
         input_image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
 # ---------------------------------------------------------------------------
-# Face Processing & Overlay Execution (Using Modern MediaPipe Solutions Fallback)
+# Face Processing & Overlay Execution
 # ---------------------------------------------------------------------------
 if input_image is not None:
     input_image = np.ascontiguousarray(input_image)
@@ -137,59 +139,68 @@ if input_image is not None:
             rgb_image = np.ascontiguousarray(rgb_image)
 
             try:
-                # Fallback check for solutions module across mediapipe versions
-                mp_face_mesh = getattr(mp, "solutions", None)
-                if mp_face_mesh and hasattr(mp_face_mesh, "face_mesh"):
-                    face_mesh_obj = mp_face_mesh.face_mesh.FaceMesh(
-                        static_image_mode=True, max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.3
+                # Use modern MediaPipe Vision FaceLandmarker via Tasks API
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_image)
+                
+                base_options = python.BaseOptions(model_asset_path='face_landmarker.task')
+                options = vision.FaceLandmarkerOptions(
+                    base_options=base_options,
+                    output_face_blendshapes=False,
+                    num_faces=1
+                )
+                
+                # Automatically download the face landmarker model if not present locally
+                model_path = 'face_landmarker.task'
+                if not os.path.exists(model_path):
+                    import urllib.request
+                    urllib.request.urlretrieve(
+                        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                        model_path
                     )
-                    results = face_mesh_obj.process(rgb_image)
-                    multi_face_landmarks = results.multi_face_landmarks
-                else:
-                    # Modern MediaPipe task vision API fallback or lightweight approximation
-                    # Using legacy fallback package check or alternative if available
-                    raise ImportError("mp.solutions unavailable in current mediapipe build.")
 
-                if multi_face_landmarks:
-                    landmarks = multi_face_landmarks[0].landmark
-                    
-                    left_eye = np.array([landmarks[33].x * w, landmarks[33].y * h])
-                    right_eye = np.array([landmarks[263].x * w, landmarks[263].y * h])
-                    eye_center = (left_eye + right_eye) / 2.0
+                with vision.FaceLandmarker.create_from_options(options) as landmarker:
+                    detection_result = landmarker.detect(mp_image)
 
-                    eye_distance = np.linalg.norm(right_eye - left_eye)
-                    angle = np.degrees(np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
+                    if detection_result.face_landmarks:
+                        landmarks = detection_result.face_landmarks[0]
+                        
+                        # Indices 33 (left eye) and 263 (right eye) remain identical in modern face mesh
+                        left_eye = np.array([landmarks[33].x * w, landmarks[33].y * h])
+                        right_eye = np.array([landmarks[263].x * w, landmarks[263].y * h])
+                        eye_center = (left_eye + right_eye) / 2.0
 
-                    target_width = max(10, int(eye_distance * scale_factor))
-                    aspect_ratio = glasses_img.shape[0] / max(1, glasses_img.shape[1])
-                    target_height = max(10, int(target_width * aspect_ratio))
+                        eye_distance = np.linalg.norm(right_eye - left_eye)
+                        angle = np.degrees(np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
 
-                    output_image = input_image.copy()
+                        target_width = max(10, int(eye_distance * scale_factor))
+                        aspect_ratio = glasses_img.shape[0] / max(1, glasses_img.shape[1])
+                        target_height = max(10, int(target_width * aspect_ratio))
 
-                    resized_glasses = cv2.resize(glasses_img, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                        output_image = input_image.copy()
 
-                    if enable_lighting:
-                        roi_y1, roi_y2 = max(0, int(eye_center[1] - 50)), min(h, int(eye_center[1] + 50))
-                        roi_x1, roi_x2 = max(0, int(eye_center[0] - 50)), min(w, int(eye_center[0] + 50))
-                        face_roi = input_image[roi_y1:roi_y2, roi_x1:roi_x2]
-                        resized_glasses = adjust_lighting(resized_glasses, face_roi)
+                        resized_glasses = cv2.resize(glasses_img, (target_width, target_height), interpolation=cv2.INTER_AREA)
 
-                    rotated_glasses = rotate_image_unbound(resized_glasses, -angle)
+                        if enable_lighting:
+                            roi_y1, roi_y2 = max(0, int(eye_center[1] - 50)), min(h, int(eye_center[1] + 50))
+                            roi_x1, roi_x2 = max(0, int(eye_center[0] - 50)), min(w, int(eye_center[0] + 50))
+                            face_roi = input_image[roi_y1:roi_y2, roi_x1:roi_x2]
+                            resized_glasses = adjust_lighting(resized_glasses, face_roi)
 
-                    gh, gw = rotated_glasses.shape[:2]
-                    top_left_x = int(eye_center[0] - gw / 2)
-                    top_left_y = int(eye_center[1] - gh / 2 + vertical_offset)
+                        rotated_glasses = rotate_image_unbound(resized_glasses, -angle)
 
-                    output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
+                        gh, gw = rotated_glasses.shape[:2]
+                        top_left_x = int(eye_center[0] - gw / 2)
+                        top_left_y = int(eye_center[1] - gh / 2 + vertical_offset)
 
-                    st.subheader("🎉 Your Try-On Result")
-                    final_rgb = cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB)
-                    st.image(np.ascontiguousarray(final_rgb, dtype=np.uint8))
-                else:
-                    st.warning("⚠️ No face detected in the photo. Please make sure your face is clearly visible and well-lit.")
+                        output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
+
+                        st.subheader("🎉 Your Try-On Result")
+                        final_rgb = cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB)
+                        st.image(np.ascontiguousarray(final_rgb, dtype=np.uint8))
+                    else:
+                        st.warning("⚠️ No face detected in the photo. Please make sure your face is clearly visible and well-lit.")
             except Exception as e:
-                # If solutions namespace isn't bundled in the installed build, pin mediapipe back to 0.10.21 explicitly
-                st.error(f"MediaPipe version incompatibility error: {e}. Please ensure mediapipe<=0.10.21 is pinned in requirements.txt")
+                st.error(f"Processing error: {e}")
         else:
             st.error(f"OpenCV failed to decode asset: {selected_asset}.")
     else:
