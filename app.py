@@ -121,6 +121,7 @@ if input_image is not None:
         glasses_img = cv2.imread(asset_path, cv2.IMREAD_UNCHANGED)
         
         if glasses_img is not None:
+            # Ensure 4-channel RGBA
             if glasses_img.shape[2] == 3:
                 alpha_channel = np.ones((glasses_img.shape[0], glasses_img.shape[1], 1), dtype=glasses_img.dtype) * 255
                 glasses_img = np.concatenate((glasses_img, alpha_channel), axis=2)
@@ -175,7 +176,7 @@ if input_image is not None:
                         output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
 
                         st.subheader("🎉 Your Try-On Result")
-                        st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), width="stretch")
+                        st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), use_container_width=True)
                 else:
                     st.warning("⚠️ No face detected in the photo. Please make sure your face is clearly visible and well-lit.")
         else:
