@@ -24,14 +24,16 @@ st.write("Take a snapshot with your browser camera or upload a photo to try on g
 # ---------------------------------------------------------------------------
 def rotate_image_unbound(image, angle):
     (h, w) = image.shape[:2]
+    if h <= 0 or w <= 0:
+        return image
     (cx, cy) = (w // 2, h // 2)
 
     M = cv2.getRotationMatrix2D((cx, cy), angle, 1.0)
     cos = np.abs(M[0, 0])
     sin = np.abs(M[0, 1])
 
-    nW = int((h * sin) + (w * cos))
-    nH = int((h * cos) + (w * sin))
+    nW = max(1, int((h * sin) + (w * cos)))
+    nH = max(1, int((h * cos) + (w * sin)))
 
     M[0, 2] += (nW / 2) - cx
     M[1, 2] += (nH / 2) - cy
@@ -47,7 +49,7 @@ def overlay_transparent(background, overlay, x, y):
     bg_h, bg_w = background.shape[:2]
     ol_h, ol_w = overlay.shape[:2]
 
-    if x >= bg_w or y >= bg_h or x + ol_w <= 0 or y + ol_h <= 0:
+    if ol_h <= 0 or ol_w <= 0 or x >= bg_w or y >= bg_h or x + ol_w <= 0 or y + ol_h <= 0:
         return background
 
     x1, x2 = max(0, x), min(bg_w, x + ol_w)
@@ -55,6 +57,9 @@ def overlay_transparent(background, overlay, x, y):
 
     overlay_x1, overlay_x2 = max(0, -x), min(ol_w, bg_w - x)
     overlay_y1, overlay_y2 = max(0, -y), min(ol_h, bg_h - y)
+
+    if y1 >= y2 or x1 >= x2 or overlay_y1 >= overlay_y2 or overlay_x1 >= overlay_x2:
+        return background
 
     alpha = overlay[overlay_y1:overlay_y2, overlay_x1:overlay_x2, 3] / 255.0
     for c in range(0, 3):
@@ -122,13 +127,15 @@ if input_image is not None:
         
         if glasses_img is not None:
             # Ensure 4-channel RGBA
-            if glasses_img.shape[2] == 3:
+            if len(glasses_img.shape) == 2: # Grayscale
+                glasses_img = cv2.cvtColor(glasses_img, cv2.COLOR_GRAY2BGRA)
+            elif glasses_img.shape[2] == 3: # BGR
                 alpha_channel = np.ones((glasses_img.shape[0], glasses_img.shape[1], 1), dtype=glasses_img.dtype) * 255
                 glasses_img = np.concatenate((glasses_img, alpha_channel), axis=2)
             
-            if fix_black_bg:
+            if fix_black_bg and glasses_img.shape[2] >= 3:
                 gray = cv2.cvtColor(glasses_img[:, :, :3], cv2.COLOR_BGR2GRAY)
-                _, alpha = cv2.threshold(gray, 20, 255, cv2.THRESH_BINARY)
+                _, alpha = cv2.threshold(gray, 25, 255, cv2.THRESH_BINARY)
                 glasses_img[:, :, 3] = alpha
 
             h, w, _ = input_image.shape
@@ -152,31 +159,30 @@ if input_image is not None:
                     eye_distance = np.linalg.norm(right_eye - left_eye)
                     angle = np.degrees(np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]))
 
-                    target_width = int(eye_distance * scale_factor)
-                    aspect_ratio = glasses_img.shape[0] / glasses_img.shape[1]
-                    target_height = int(target_width * aspect_ratio)
+                    target_width = max(10, int(eye_distance * scale_factor))
+                    aspect_ratio = glasses_img.shape[0] / max(1, glasses_img.shape[1])
+                    target_height = max(10, int(target_width * aspect_ratio))
 
                     output_image = input_image.copy()
 
-                    if target_width > 0 and target_height > 0:
-                        resized_glasses = cv2.resize(glasses_img, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                    resized_glasses = cv2.resize(glasses_img, (target_width, target_height), interpolation=cv2.INTER_AREA)
 
-                        if enable_lighting:
-                            roi_y1, roi_y2 = max(0, int(eye_center[1] - 50)), min(h, int(eye_center[1] + 50))
-                            roi_x1, roi_x2 = max(0, int(eye_center[0] - 50)), min(w, int(eye_center[0] + 50))
-                            face_roi = input_image[roi_y1:roi_y2, roi_x1:roi_x2]
-                            resized_glasses = adjust_lighting(resized_glasses, face_roi)
+                    if enable_lighting:
+                        roi_y1, roi_y2 = max(0, int(eye_center[1] - 50)), min(h, int(eye_center[1] + 50))
+                        roi_x1, roi_x2 = max(0, int(eye_center[0] - 50)), min(w, int(eye_center[0] + 50))
+                        face_roi = input_image[roi_y1:roi_y2, roi_x1:roi_x2]
+                        resized_glasses = adjust_lighting(resized_glasses, face_roi)
 
-                        rotated_glasses = rotate_image_unbound(resized_glasses, -angle)
+                    rotated_glasses = rotate_image_unbound(resized_glasses, -angle)
 
-                        gh, gw = rotated_glasses.shape[:2]
-                        top_left_x = int(eye_center[0] - gw / 2)
-                        top_left_y = int(eye_center[1] - gh / 2 + vertical_offset)
+                    gh, gw = rotated_glasses.shape[:2]
+                    top_left_x = int(eye_center[0] - gw / 2)
+                    top_left_y = int(eye_center[1] - gh / 2 + vertical_offset)
 
-                        output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
+                    output_image = overlay_transparent(output_image, rotated_glasses, top_left_x, top_left_y)
 
-                        st.subheader("🎉 Your Try-On Result")
-                        st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), use_container_width=True)
+                    st.subheader("🎉 Your Try-On Result")
+                    st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), use_container_width=True)
                 else:
                     st.warning("⚠️ No face detected in the photo. Please make sure your face is clearly visible and well-lit.")
         else:
