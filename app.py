@@ -3,7 +3,6 @@ import cv2
 import numpy as np
 import streamlit as st
 import mediapipe as mp
-import mediapipe.python.solutions.face_mesh as mp_face_mesh
 
 # ---------------------------------------------------------------------------
 # Streamlit Page Configuration
@@ -15,13 +14,15 @@ st.set_page_config(
 )
 
 st.title("👓 Real-Time Virtual Glasses Try-On")
-st.write("Take a snapshot with your browser camera or upload a photo to try on glasses!")
+st.write("Take a snapshot with your camera or upload a photo to try on glasses in real-time!")
 
 # ---------------------------------------------------------------------------
-# Helper Functions: Image Transformation & Overlays
+# Helper Functions: Transformation & Overlay Operations
 # ---------------------------------------------------------------------------
 def rotate_image_unbound(image, angle):
-    """Rotates an image by an angle without clipping corners by expanding the canvas."""
+    """
+    Rotates an image by an angle without clipping corners by expanding the canvas.
+    """
     (h, w) = image.shape[:2]
     (cx, cy) = (w // 2, h // 2)
 
@@ -43,7 +44,9 @@ def rotate_image_unbound(image, angle):
     )
 
 def overlay_transparent(background, overlay, x, y):
-    """Blends 4-channel RGBA overlay onto 3-channel BGR background image."""
+    """
+    Blends a 4-channel RGBA overlay onto a 3-channel BGR background image at (x, y).
+    """
     bg_h, bg_w = background.shape[:2]
     ol_h, ol_w = overlay.shape[:2]
 
@@ -65,7 +68,9 @@ def overlay_transparent(background, overlay, x, y):
     return background
 
 def adjust_lighting(overlay_img, roi_bgr):
-    """Dynamically scales overlay asset brightness matching facial ROI."""
+    """
+    Dynamically scales overlay asset brightness matching facial ROI.
+    """
     if roi_bgr.size == 0:
         return overlay_img
     
@@ -119,7 +124,8 @@ if input_image is not None and os.path.exists(selected_asset):
         h, w, _ = input_image.shape
         rgb_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2RGB)
         
-        with mp_face_mesh.FaceMesh(
+        # Access MediaPipe FaceMesh safely inside context manager
+        with mp.solutions.face_mesh.FaceMesh(
             static_image_mode=True,
             max_num_faces=1,
             refine_landmarks=True,
@@ -163,6 +169,6 @@ if input_image is not None and os.path.exists(selected_asset):
                     st.subheader("🎉 Your Try-On Result")
                     st.image(cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB), use_container_width=True)
             else:
-                st.warning("No face detected in the photo. Please make sure your face is clearly visible and well-lit.")
+                st.warning("No face detected in the photo. Please ensure your face is clearly visible and well-lit.")
     else:
         st.error(f"Asset format error in {selected_asset}. Please ensure it is a 4-channel transparent PNG file.")
